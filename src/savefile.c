@@ -2,10 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <limits.h>
+#include <errno.h>
+#include <limits.h>
 
-
-
-
+#ifndef PATH_MAX
+#define PATH_MAX 4096  // Fallback, falls das System keinen PATH_MAX definiert
+#endif
 
 
 static void wr_be32(unsigned char *p, uint32_t v) {
@@ -86,7 +90,7 @@ int save_write(const char *path, const Save *s) {
         return 0;
     }
     size_t wr = fwrite(s->buf, 1, s->size, fp);
-    fclose(fp);
+    fclose(fp); 
     return wr == s->size;
 }
 
@@ -220,4 +224,41 @@ int save_write_stat(Save *s, int stat_index, int value) {
     return 1;
 }
 
+int save_write_inplace_atomic(const char *path, const Save *s, int make_backup) {
+    if (!path || !s || !s->buf) return 0;
 
+    char tmp[PATH_MAX];
+    char bak[PATH_MAX];
+
+    // tmp- & bak-Pfade bauen
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) return 0;
+    if (snprintf(bak, sizeof(bak), "%s.bak", path) >= (int)sizeof(bak)) return 0;
+
+    // 1) in Temp schreiben
+    FILE *fp = fopen(tmp, "wb");
+    if (!fp) {
+        fprintf(stderr, "open (write tmp) '%s': %s\n", tmp, strerror(errno));
+        return 0;
+    }
+    size_t wr = fwrite(s->buf, 1, s->size, fp);
+    fclose(fp);
+    if (wr != s->size) {
+        fprintf(stderr, "write (tmp) short: %zu/%zu\n", wr, s->size);
+        remove(tmp);
+        return 0;
+    }
+
+    // 2) optional Backup anlegen (alte Datei -> .bak)
+    if (make_backup) {
+        // existierendes .bak ignorieren/überschreiben
+        rename(path, bak); // wenn es fehlschlägt (z. B. ENOENT), ist das ok
+    }
+
+    // 3) Temp atomisch an Ziel verschieben
+    if (rename(tmp, path) != 0) {
+        fprintf(stderr, "rename('%s'->'%s'): %s\n", tmp, path, strerror(errno));
+        remove(tmp);
+        return 0;
+    }
+    return 1;
+}

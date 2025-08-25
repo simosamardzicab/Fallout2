@@ -29,6 +29,7 @@ int  save_read_stat(const Save *s, int stat_index, int *out_value);
 int  save_load(const char *path, Save *out);
 int  save_write(const char *path, const Save *s);
 int  save_write_stat(Save *s, int stat_index, int value);
+int save_write_inplace_atomic(const char *path, const Save *s, int make_backup);
 void save_free(Save *s);
 
 /* Convenience */

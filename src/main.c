@@ -26,7 +26,8 @@ int main(int argc, char **argv) {
     int set_stat_flag[STAT_COUNT] = {0};
     int set_stat_value[STAT_COUNT] = {0};
     int changed = 0;
-  
+    int in_place = 1;
+    int no_backup = 0;  
 
     static struct option opts[] = {
         {"file",       required_argument, 0, 'f'},
@@ -42,6 +43,8 @@ int main(int argc, char **argv) {
         {"set-int", required_argument, 0, 2005},
         {"set-agi", required_argument, 0, 2006},
         {"set-lck", required_argument, 0, 2007},
+	{"in-place",   no_argument,       0, 3101},  // explizit in-place (Default)
+	{"no-backup",  no_argument,       0, 3102},  // kein .bak anlegen
 	{"help",       no_argument,       0, 'h'},
         {0,0,0,0}
     };
@@ -61,12 +64,14 @@ int main(int argc, char **argv) {
 	    case 2005: set_stat_flag[STAT_IN] = 1; set_stat_value[STAT_IN] = atoi(optarg); break;
 	    case 2006: set_stat_flag[STAT_AG] = 1; set_stat_value[STAT_AG] = atoi(optarg); break;
 	    case 2007: set_stat_flag[STAT_LK] = 1; set_stat_value[STAT_LK] = atoi(optarg); break;
+	    case 3101: in_place = 1; break;
+	    case 3102: no_backup = 1; break;
             case 'h': default: usage(argv[0]); return (c=='h') ? 0 : 1;
         }
     }
 
     if (!file) { usage(argv[0]); return 1; }
-    if (!outfile) outfile = file;  /* Standard: in-place */
+
 
     Save s;
     if (!save_load(file, &s)) {
@@ -110,48 +115,48 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (new_name) {
-        if (!save_write(outfile, &s)) {
-            fprintf(stderr, "Fehler beim Schreiben nach '%s'.\n", outfile);
-            save_free(&s);
-            return 1;
-        }
-        printf("Gespeichert nach: %s\n", outfile);
-    }
 
-    /* Setzen: einzelne SPECIAL? */
-    int any_set = 0;
-    for (int i=0;i<STAT_COUNT;++i) if (set_stat_flag[i]) any_set = 1;
-	if (any_set) {
-        	size_t stats_off;
-        	if (!save_find_stats_offset(&s, &stats_off)) {
-        		fprintf(stderr, "Fehler: Stats-Block nicht gefunden (Abbruch ohne Schreiben).\n");
-        		save_free(&s);
-        		return 1;
-    		}
-	    	for (int i=0;i<STAT_COUNT;++i) {
-        		if (set_stat_flag[i]) {
-            			if (!save_write_stat(&s, i, set_stat_value[i])) {
-                			fprintf(stderr, "Fehler beim Setzen eines Stats (Index %d).\n", i);
-                			save_free(&s);
-                			return 1;
-            			}
-        		}
-    		}
-	}
-    if (new_name) { if (!save_set_player_name(&s, new_name)) { fprintf(stderr,"Fehler: Name konnte nicht gesetzt werden.\n"); save_free(&s); return 1; } changed = 1; }
+if (new_name) { 
+    if (!save_set_player_name(&s, new_name)) { 
+	    fprintf(stderr,"Fehler: Name konnte nicht gesetzt werden.\n"); 
+	    save_free(&s); 
+	    return 1; 
+    } 
+    changed = 1;
+    }
 for (int i=0;i<STAT_COUNT;++i) {
     if (set_stat_flag[i]) {
         if (!save_write_stat(&s, i, set_stat_value[i])) { fprintf(stderr,"Fehler beim Setzen eines Stats (Index %d).\n", i); save_free(&s); return 1; }
         changed = 1;
     }
 }
-    /* Schreiben – NIE standardmäßig in-place */
-    if (changed) {
-    	if (!outfile) outfile = "SAVE.out.DAT";   // oder auto: gleiche Map + ".patched.DAT"
-    	if (!save_write(outfile, &s)) { fprintf(stderr,"Fehler beim Schreiben nach '%s'.\n", outfile); save_free(&s); return 1; }
-    	printf("Gespeichert nach: %s\n", outfile);
-	}
+
+if (changed) {
+    if (in_place && !outfile) {
+        // atomisches In-Place mit Backup (wenn nicht abgeschaltet)
+        if (!save_write_inplace_atomic(file, &s, !no_backup)) {
+            fprintf(stderr, "Fehler beim In-Place-Schreiben nach '%s'.\n", file);
+            save_free(&s);
+            return 1;
+        }
+        printf("Gespeichert (in-place)%s: %s\n", no_backup ? "" : " + Backup(.bak)", file);
+    } else {
+        // explizite Ausgabe oder in_place=0
+        if (!outfile) {
+            // falls jemand in_place=0 setzt, aber kein --out angibt:
+            outfile = "SAVE.out.DAT";
+        }
+        if (!save_write(outfile, &s)) {
+            fprintf(stderr, "Fehler beim Schreiben nach '%s'.\n", outfile);
+            save_free(&s);
+            return 1;
+        }
+        printf("Gespeichert: %s\n", outfile);
+    }
+}
+
+
+
 
     save_free(&s);
     return 0;
